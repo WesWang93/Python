@@ -1,0 +1,18 @@
+[submodule "Python230/flask-mailroom"]
+	path = Python230/flask-mailroom
+	url = https://github.com/WesWang93/flask-mailroom
+[submodule "Python230/echo-server"]
+	path = Python230/echo-server
+	url = https://github.com/WesWang93/echo-server
+[submodule "Python230/socket-http-server"]
+	path = Python230/socket-http-server
+	url = https://github.com/WesWang93/socket-http-server
+[submodule "Python230/Django-blog"]
+	path = Python230/Django-blog
+	url = https://github.com/WesWang93/Django-blog
+[submodule "Python230/ustjay-ethay-actsfayig"]
+	path = Python230/ustjay-ethay-actsfayig
+	url = https://github.com/WesWang93/ustjay-ethay-actsfayig
+[submodule "Python230/wsgi-calculator"]
+	path = Python230/wsgi-calculator
+	url = https://github.com/WesWang93/wsgi-calculator
