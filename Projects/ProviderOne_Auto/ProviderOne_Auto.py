@@ -83,7 +83,7 @@ def search_client(browser, date, lname, fname, dob, ssn, use_ssn=False):
 
     efile_path = CLT_PATH + f"/{lname}, {fname} {dob.replace('/','-')}"
 
-    if 1==0:
+    if "Active Coverage" in browser.find_element_by_id("nlbl:BenifitInformationCode").text:
         file_name = "Inc-Res-Ins"
     else:
         file_name = "Inactive_ProviderOne"
@@ -120,5 +120,5 @@ def browse_prov1(login, clients):
 
 
 if __name__ == "__main__":
-    browse_prov1(get_login(), read_info(WB_PATH))
     create_folder(ALT_PATH)
+    browse_prov1(get_login(), load_clients(WB_PATH))
