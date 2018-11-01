@@ -2,9 +2,12 @@
 Name: Automated ProviderOne Check
 Author: Wesley Wang
 Date: 10/28/2018
-Description: Automated ProviderOne Check
+Description: Automate ProviderOne eligibility check with Selenium WebDriver
+             using extracted client info from a Excel worksheet.
 '''
 
+import time
+import os
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
@@ -13,8 +16,6 @@ from selenium.common.exceptions import TimeoutException
 from openpyxl import load_workbook
 from xlrd import XLRDError
 import pandas as pd
-import time
-import os
 
 
 URL = "https://www.waproviderone.org/"  # ProviderOne URL
@@ -26,6 +27,10 @@ ZOOM_LEVEL = "70%"
 
 
 def create_folder(path):
+    '''
+    Create alternative folder to hold screenshots
+    that do not have folder in destined location
+    '''
     if not os.path.isdir(path):
         try:
             os.mkdir(path)
@@ -33,11 +38,12 @@ def create_folder(path):
             print(f"Folder created at {full_path}")
         except OSError:
             print("An error occured when creating folder!")
-        except:
-            print("An error occured!")
 
 
 def get_login():
+    '''
+    Obtain user's ProviderOne login information
+    '''
     check_login = ""
     while check_login != "y":
         domain_id = input("Please enter your ProviderOne Domain ID: ")
@@ -55,6 +61,9 @@ def get_login():
 
 
 def page_load(browser, key):
+    '''
+    Wait for page to load until key element is clickable
+    '''
     try:
         WebDriverWait(browser, 60).until(ec.element_to_be_clickable((By.ID, key)))
     except TimeoutException:
@@ -62,23 +71,34 @@ def page_load(browser, key):
 
 
 def load_clients(file):
+    '''
+    Read clients information from target Excel worksheet
+    Return a list of client info and a tuple that holds
+    index of Prov1 Status and Prov1 Location columns
+    '''
     try:
-        ws = pd.read_excel(file, WS_NAME, na_filter=False)
-        clients = [(lname, fname, dob.strftime("%m/%d/%Y"), ssn.replace('-','').strip())
-                    for (lname, fname, dob, ssn)
-                    in zip(ws["LastName"], ws["FirstName"], ws["DoB"], ws["SSN"], )]
-        prov1_cols = (ws.columns.get_loc("ProviderOne Status") + 1,
-                    ws.columns.get_loc("ProviderOne Location") + 1)
+        sheet = pd.read_excel(file, WS_NAME, na_filter=False)
+        clients = [(lname, fname, dob.strftime("%m/%d/%Y"), ssn.replace('-', '').strip())
+                   for (lname, fname, dob, ssn)
+                   in zip(sheet["LastName"], sheet["FirstName"], sheet["DoB"], sheet["SSN"], )]
+        prov1_cols = (sheet.columns.get_loc("ProviderOne Status") + 1,
+                      sheet.columns.get_loc("ProviderOne Location") + 1)
         return clients, prov1_cols
     except FileNotFoundError:
         print("File not found !")
     except XLRDError:
         print("An error occured when reading Excel file!")
-    except:
-        print("An error occured!")
 
 
-def search_client(browser, sheet, date, row, stat_col, loc_col, lname, fname, dob, ssn, use_ssn=False):
+def search_client(browser, sheet, date, row, stat_col,
+                  loc_col, lname, fname, dob, ssn, use_ssn=False):
+    '''
+    Search client eligibility with given info
+    Update worksheet to show eligibility status and location
+    Take screenshot of eligbility status page
+    then store it in client folder
+    Remove previous screenshot of bad search result if applicable
+    '''
     page_load(browser, "rfld_d:TO_DATE")
 
     if use_ssn:
@@ -106,7 +126,7 @@ def search_client(browser, sheet, date, row, stat_col, loc_col, lname, fname, do
             sheet.cell(row=row, column=stat_col).value = "None"
             sheet.cell(row=row, column=loc_col).value = "None"
 
-    efile_path = CLT_PATH + f"/{lname}, {fname} {dob.replace('/','-')}/Client Eligibility"
+    efile_path = CLT_PATH + f"/{lname}, {fname} {dob.replace('/', '-')}/Client Eligibility"
     if not os.path.isdir(efile_path):
         efile_path = ALT_PATH
         file_name = f"({fname} {lname})" + file_name
@@ -125,6 +145,10 @@ def search_client(browser, sheet, date, row, stat_col, loc_col, lname, fname, do
 
 
 def browse_prov1(login, clients, prov1_col):
+    '''
+    Log into ProviderOne
+    Pass in client info to capture eligibility status
+    '''
     browser = webdriver.Chrome("chromedriver.exe")
     browser.maximize_window()
     browser.get(URL)
@@ -135,26 +159,24 @@ def browse_prov1(login, clients, prov1_col):
     browser.find_element_by_id("GoButton").click()
     browser.find_element_by_link_text("Benefit Inquiry").click()
 
-    wb = load_workbook(WB_PATH)
-    ws = wb[WS_NAME]
+    workbook = load_workbook(WB_PATH)
+    sheet = workbook[WS_NAME]
     date = (time.strftime("%Y"), time.strftime("%m"), time.strftime("%d"))
     stat_col = prov1_col[0]
     loc_col = prov1_col[1]
     for client in clients:
         row = clients.index(client) + 2
-        search_client(browser, ws, date, row, stat_col, loc_col,
-                    client[0], client[1], client[2], client[3])
+        search_client(browser, sheet, date, row, stat_col, loc_col,
+                      client[0], client[1], client[2], client[3])
         if len(client[3]) == 9 and client[3].isdigit() and \
-            ws.cell(row=row, column=stat_col).value == "None":
-            search_client(browser, ws, date, row, stat_col, loc_col,
-                    client[0], client[1], client[2], client[3], True)
+            sheet.cell(row=row, column=stat_col).value == "None":
+            search_client(browser, sheet, date, row, stat_col, loc_col,
+                          client[0], client[1], client[2], client[3], True)
 
-    wb.save(WB_PATH)
+    workbook.save(WB_PATH)
     browser.close()
-    
+
 
 if __name__ == "__main__":
     create_folder(ALT_PATH)
-    clients, prov1_col = load_clients(WB_PATH)
-    browse_prov1(get_login(), clients, prov1_col)
-    
+    browse_prov1(get_login(), *load_clients(WB_PATH))
