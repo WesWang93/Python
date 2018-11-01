@@ -3,14 +3,14 @@ Name: Automated ProviderOne Check
 Author: Wesley Wang
 Date: 10/28/2018
 Description: Automated ProviderOne Check
-
-Tasks to do:
-Figure out how to detect active status
-Update excel sheet
-Add note if not in king/snohomish/island
 '''
 
 from selenium import webdriver
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
+from openpyxl import load_workbook
 from xlrd import XLRDError
 import pandas as pd
 import time
@@ -43,7 +43,10 @@ def get_login():
         domain_id = input("Please enter your ProviderOne Domain ID: ")
         user_name = input("Please enter your ProviderOne Username: ")
         password = input("Please enter your ProviderOne Password: ")
-        print(f"Your login info is:\nDomain ID: {domain_id}\tUsername: {user_name} \tPassword: {password}")
+        print(f'''Your login info is:
+            Domain ID: {domain_id}
+            Username: {user_name} 
+            Password: {password}''')
         check_login = input("Is it correct? (Y/N) ").lower()
         if check_login not in ["y", "n"]:
             print("Please enter correct answer (Y/N)!!")
@@ -51,13 +54,22 @@ def get_login():
     return login
 
 
+def page_load(browser, key):
+    try:
+        WebDriverWait(browser, 60).until(ec.element_to_be_clickable((By.ID, key)))
+    except TimeoutException:
+        print("Timeout")
+
+
 def load_clients(file):
     try:
-        main = pd.read_excel(file, WS_NAME, na_filter=False)
-        clients = [(lname, fname, dob.strftime("%m/%d/%Y"), ssn.replace('-','').strip()) \
-                    for (lname, fname, dob, ssn) \
-                    in zip(main["LastName"], main["FirstName"], main["DOB"], main["SSN"], )]
-        return clients
+        ws = pd.read_excel(file, WS_NAME, na_filter=False)
+        clients = [(lname, fname, dob.strftime("%m/%d/%Y"), ssn.replace('-','').strip())
+                    for (lname, fname, dob, ssn)
+                    in zip(ws["LastName"], ws["FirstName"], ws["DoB"], ws["SSN"], )]
+        prov1_cols = (ws.columns.get_loc("ProviderOne Status") + 1,
+                    ws.columns.get_loc("ProviderOne Location") + 1)
+        return clients, prov1_cols
     except FileNotFoundError:
         print("File not found !")
     except XLRDError:
@@ -66,12 +78,9 @@ def load_clients(file):
         print("An error occured!")
 
 
-def update_worksheet():
-    pass
+def search_client(browser, sheet, date, row, stat_col, loc_col, lname, fname, dob, ssn, use_ssn=False):
+    page_load(browser, "rfld_d:TO_DATE")
 
-
-def search_client(browser, date, lname, fname, dob, ssn, use_ssn=False):
-    time.sleep(0.3)
     if use_ssn:
         browser.find_element_by_id("nfld_n:dbZzMBR_IDENTIFIER-IDNTFR_SSN").send_keys(ssn)
     else:
@@ -79,27 +88,43 @@ def search_client(browser, date, lname, fname, dob, ssn, use_ssn=False):
         browser.find_element_by_id("nfld_a:dbZzMBR_DMGRPHC-FIRST_NAME").send_keys(fname)
     browser.find_element_by_id("nfld_d:dbZzMBR_DMGRPHC-BIRTH_DATE").send_keys(dob)
     browser.execute_script("submitForm()")
-    browser.execute_script(f"document.body.style.zoom = '{ZOOM_LEVEL}'")
 
-    efile_path = CLT_PATH + f"/{lname}, {fname} {dob.replace('/','-')}"
+    page_load(browser, "nlbl:CountyCode")
 
     if "Active Coverage" in browser.find_element_by_id("nlbl:BenifitInformationCode").text:
         file_name = "Inc-Res-Ins"
+        sheet.cell(row=row, column=stat_col).value = "Prov1"
+        sheet.cell(row=row, column=loc_col).value = \
+            browser.find_element_by_id("nlbl:CountyCode").text.split("-")[1]
+    elif "Inactive" in browser.find_element_by_id("nlbl:BenifitInformationCode").text:
+        file_name = "Inactive_ProviderOne"
+        sheet.cell(row=row, column=stat_col).value = "Inactive"
+        sheet.cell(row=row, column=loc_col).value = "None"
     else:
         file_name = "Inactive_ProviderOne"
+        if sheet.cell(row=row, column=stat_col).value is None:
+            sheet.cell(row=row, column=stat_col).value = "None"
+            sheet.cell(row=row, column=loc_col).value = "None"
 
+    efile_path = CLT_PATH + f"/{lname}, {fname} {dob.replace('/','-')}/Client Eligibility"
     if not os.path.isdir(efile_path):
         efile_path = ALT_PATH
         file_name = f"({fname} {lname})" + file_name
+    file_ext = f"_{fname[0]}{lname[0]}_{date[0]}_{date[1]}.png"
 
-    export_path = efile_path + f"/{file_name}_{fname[0]}{lname[0]}_{date[0]}_{date[1]}.png"
+    browser.execute_script(f"document.body.style.zoom = '{ZOOM_LEVEL}'")
+
+    export_path = efile_path + "/" + file_name + file_ext
     if not os.path.exists(export_path):
-        screenshot = browser.get_screenshot_as_file(export_path)
+        for doc in os.listdir(efile_path):
+            if "Inactive" in doc and doc.endswith(file_ext):
+                os.remove(os.path.join(efile_path, doc))
+        browser.get_screenshot_as_file(export_path)
 
     browser.execute_script("submitForm('InquiryButton')")
 
 
-def browse_prov1(login, clients):
+def browse_prov1(login, clients, prov1_col):
     browser = webdriver.Chrome("chromedriver.exe")
     browser.maximize_window()
     browser.get(URL)
@@ -109,16 +134,27 @@ def browse_prov1(login, clients):
     browser.find_element_by_id("LoginButton").click()
     browser.find_element_by_id("GoButton").click()
     browser.find_element_by_link_text("Benefit Inquiry").click()
+
+    wb = load_workbook(WB_PATH)
+    ws = wb[WS_NAME]
     date = (time.strftime("%Y"), time.strftime("%m"), time.strftime("%d"))
-    
+    stat_col = prov1_col[0]
+    loc_col = prov1_col[1]
     for client in clients:
-        search_client(browser, date, client[0], client[1], client[2], client[3])
-        if len(client[3]) == 9 and client[3].isdigit():
-            search_client(browser, date, client[0], client[1], client[2], client[3], True)
+        row = clients.index(client) + 2
+        search_client(browser, ws, date, row, stat_col, loc_col,
+                    client[0], client[1], client[2], client[3])
+        if len(client[3]) == 9 and client[3].isdigit() and \
+            ws.cell(row=row, column=stat_col).value == "None":
+            search_client(browser, ws, date, row, stat_col, loc_col,
+                    client[0], client[1], client[2], client[3], True)
 
+    wb.save(WB_PATH)
     browser.close()
-
+    
 
 if __name__ == "__main__":
     create_folder(ALT_PATH)
-    browse_prov1(get_login(), load_clients(WB_PATH))
+    clients, prov1_col = load_clients(WB_PATH)
+    browse_prov1(get_login(), clients, prov1_col)
+    
